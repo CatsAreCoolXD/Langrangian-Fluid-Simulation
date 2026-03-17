@@ -8,7 +8,7 @@
 #include <numeric>
 #include <thread>
 #include <future>
-#include "ctpl_stl.h"
+#include "ctpl_stl.h" // Threadpool library
 
 Simulation::Simulation(int particlesCount, float particleMass, float smoothingRadius, float targetDensity, float pressureMultiplier, float gravity, float viscosity, int simulationSteps) : particlesCount(particlesCount), initialParticlesCount(particlesCount),
         particleMass(particleMass), smoothingRadius(smoothingRadius), targetDensity(targetDensity), pressureMultiplier(pressureMultiplier), gravity(gravity), viscosity(viscosity), simulationSteps(simulationSteps), threadPool(std::thread::hardware_concurrency())
@@ -541,6 +541,7 @@ void Simulation::Update(){
 
     clock2.restart();
     deltaTime /= simulationSteps;
+    deltaTime *= timeMultiplier;
     for (int i = 0; i < simulationSteps; i++){
 
         Simulation::PredictPositions();
@@ -630,12 +631,6 @@ void Simulation::Draw(sf::RenderTexture& target){
 
     target.draw(particleVertexes);
     target.draw(circleVertexes);
-    for (Vec2& circle : circles){
-        sf::CircleShape c(circleRadius);
-        c.setPosition(circle);
-        c.setFillColor(sf::Color::White);
-        target.draw(c);
-    }
 
     const int characterSize = 16;
     for (int i = 0; i < 2; i++){

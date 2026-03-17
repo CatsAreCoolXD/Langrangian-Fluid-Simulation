@@ -63,15 +63,20 @@ int main()
     
     float newGravity = gravity;
     Slider gravitySlider(&newGravity, -20, 20, sf::Vector2f(200, 5), sf::Vector2f(1600, 275), "Gravity");
+    
+    float newTimeMultiplier = 1.f;
+    Slider timeSlider(&newTimeMultiplier, 0, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 350), "Time Multiplier");
 
     bool useGravity = true;
-    CheckBox gravityCheckBox(&useGravity, "Use Gravity", sf::Vector2f(1550, 350), sf::Vector2f(11,11));
+    CheckBox gravityCheckBox(&useGravity, "Use Gravity", sf::Vector2f(1550, 425), sf::Vector2f(11,11));
     
     bool useKernelLookups = true;
-    CheckBox kernelLookupsCheckBox(&useKernelLookups, "Use Kernel Lookups", sf::Vector2f(1550, 400), sf::Vector2f(11,11));
+    CheckBox kernelLookupsCheckBox(&useKernelLookups, "Use Kernel Lookups", sf::Vector2f(1550, 500), sf::Vector2f(11,11));
 
     sf::Text settingsWindowText(font, "Press H to toggle settings window", 16);
     settingsWindowText.setPosition(sf::Vector2f(1600,5));
+
+    SelectionMenu modeMenu(&mode, {"Simulation", "Playground"}, sf::Vector2f(1550, 575), sf::Vector2f(250, 50));
 
     std::vector<float> fpsList;
 
@@ -104,7 +109,6 @@ int main()
                     settingsWindow = !settingsWindow;
                 } else if (keyEvent->scancode == sf::Keyboard::Scancode::Tab){
                     mode = (mode + 1) % 2;
-                    sim.SetMode(mode);
                 } else if (mode == PLAYGROUND && keyEvent->scancode == sf::Keyboard::Scancode::E){
                     spawnParticles = !spawnParticles;
                     sim.EnableParticleSpawner(spawnParticles);
@@ -138,26 +142,18 @@ int main()
 
             kernelLookupsCheckBox.Draw(render, mousePos);
             sim.SetKernelLookup(useKernelLookups);
+
+            timeSlider.Draw(render, mousePos);
+            sim.SetTimeMultiplier(newTimeMultiplier);
+
+            modeMenu.Draw(render, mousePos);
+            sim.SetMode(mode);
         }
-        
 
         float avgFps = GetFps(fpsList);
         std::string fpsString = (std::string)"FPS: " + std::to_string(avgFps);
         fpsText.setString(fpsString);
         render.draw(fpsText);
-
-        // sf::CircleShape mouseCircle(smoothingRadius);
-        // mouseCircle.setPosition(mousePos - sf::Vector2f(smoothingRadius, smoothingRadius));
-        // sf::Color mouseCircleColor(100u, 200u, 100u, 100u);
-        // mouseCircle.setFillColor(mouseCircleColor);
-        // render.draw(mouseCircle);
-
-        // float densityAtMouse = sim.DensityAtPoint(mousePos);
-        // sf::Text densityText(font);
-        // std::string dt = "Density: " + std::to_string(densityAtMouse);
-        // densityText.setString(dt);
-        // densityText.setPosition(mousePos);
-        // render.draw(densityText);
 
         render.display();
         const sf::Texture& texture = render.getTexture();

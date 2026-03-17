@@ -59,13 +59,14 @@ class Simulation {
         void SetPressureMultiplier(float newPressureMultiplier) { pressureMultiplier = newPressureMultiplier; }
         void SetViscosity(float newViscosity) { viscosity = newViscosity; }
         void SetGravity(float newGravity, bool doGravity) { gravity = newGravity; enableGravity = doGravity; }
+        void SetTimeMultiplier(float newTimeMultiplier) { timeMultiplier = newTimeMultiplier; }
         void SetKernelLookup(bool enable) { useKernelLookups = enable; }
         void SetInteractionAbility(bool enable) { enableMouse = enable; } // Enable or disable the users ability to draw on the screen
         void SetMode(bool newMode) { mode = newMode; }
         void EnableParticleSpawner(bool enable) { spawnParticles = enable; }
     private:
         int particlesCount, initialParticlesCount, simulationSteps;
-        float particleMass, smoothingRadius, targetDensity, pressureMultiplier, gravity, viscosity;
+        float particleMass, smoothingRadius, targetDensity, pressureMultiplier, gravity, viscosity, timeMultiplier = 1;
         float invSmoothingRadius;
         float smoothingRadius2, invSmoothingRadius2;
         int cells;

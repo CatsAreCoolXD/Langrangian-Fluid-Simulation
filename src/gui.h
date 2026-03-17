@@ -1,5 +1,6 @@
 #include <SFML/Graphics.hpp>
 #include <vector>
+#include <iostream>
 
 class Slider {
     public:
@@ -32,4 +33,18 @@ class CheckBox {
         std::string name;
         sf::Font font;
         sf::Text* text;
+};
+
+class SelectionMenu {
+    public:
+        SelectionMenu(int *value, std::vector<std::string> names, sf::Vector2f pos, sf::Vector2f size) : value(value), names(names), pos(pos), size(size) 
+        { if (!font.openFromFile("Fonts/OpenSans-Bold.ttf")) std::cerr << "Couldn't load selection box font" << std::endl; }
+        void Draw(sf::RenderTexture& target, sf::Vector2f mousePos);
+    private:
+        int* value = nullptr;
+        sf::Vector2f pos, size;
+        std::vector<std::string> names;
+        sf::Font font;
+        bool clicked = false;
+        bool openedMenu = false;
 };

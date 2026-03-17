@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <iostream>
 
+// Slider
+
 Slider::Slider(float* value, float min, float max, sf::Vector2f size, sf::Vector2f pos, std::string valueName) : value(value), min(min), max(max), size(size), pos(pos), valueName(valueName) { 
     knobX = (*value - min) / (max-min) * size.x; 
     if (!font.openFromFile("Fonts/OpenSans-Bold.ttf")) std::cerr << "Couldn't load slider font for " << valueName << std::endl; 
@@ -58,6 +60,8 @@ void Slider::Draw(sf::RenderTexture& target, sf::Vector2f mousePos){
     for (int i = 0; i < 3; i++) target.draw(texts.at(i));
 }
 
+// CheckBox
+
 CheckBox::CheckBox(bool* value, std::string name, sf::Vector2f pos, sf::Vector2f size) : value(value), name(name), pos(pos), size(size) {
     if (!font.openFromFile("Fonts/OpenSans-Bold.ttf")) std::cerr << "Couldn't load slider font for " << name << std::endl; 
     const float characterSize = 11;
@@ -87,4 +91,55 @@ void CheckBox::Draw(sf::RenderTexture& target, sf::Vector2f mousePos){
     checkBox.setPosition(checkBoxPos);
     checkBox.setFillColor(*value ? sf::Color::Green : sf::Color::Red);
     target.draw(checkBox);
+}
+
+// SelectionMenu
+
+void SelectionMenu::Draw(sf::RenderTexture& target, sf::Vector2f mousePos){
+    if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left) && !clicked && !openedMenu) { // Of course you start a draw function by not doing anything related to drawing
+        clicked = true;
+        if (mousePos.x > pos.x && mousePos.x < pos.x + size.x) {
+            if (mousePos.y > pos.y && mousePos.y < pos.y + size.y){
+                openedMenu = true;
+                std::cout << "Toggled Clicked\n";
+            }
+        }
+    } else if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left) && !clicked && openedMenu) {
+        openedMenu = false;
+        int newValue = (mousePos.y - pos.y) / size.y - 1;
+        if (newValue >= 0) *value = std::clamp(newValue, 0, (int)names.size()-1); // Only change value when picking a new option
+    } else if (!sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) clicked = false;
+    if (*value >= names.size()) {
+        std::cerr << "Incorrect value in selectionbox\n";
+    }
+
+    sf::RectangleShape outline(size);
+    outline.setPosition(pos);
+    outline.setFillColor(sf::Color::Black);
+    outline.setOutlineColor(sf::Color::White);
+    outline.setOutlineThickness(5);
+    target.draw(outline);
+
+    std::string name = names.at(*value);
+    sf::Text text(font, name, 20);
+    sf::FloatRect bounds = text.getLocalBounds();
+    text.setPosition(sf::Vector2f(pos.x+size.x/2-bounds.size.x/2, pos.y+size.y/2-bounds.size.y/2));
+    target.draw(text);
+    if (!openedMenu) return; // Only draw menu if it is clicked on
+    int j = 1;
+    for (int i = 0; i < names.size(); i++){
+        sf::RectangleShape outline(size);
+        outline.setPosition(sf::Vector2f(pos.x, pos.y+size.y*j));
+        outline.setFillColor(sf::Color::Black);
+        outline.setOutlineColor(sf::Color::White);
+        outline.setOutlineThickness(5);
+        target.draw(outline);
+
+        std::string name = names.at(i);
+        sf::Text text(font, name, 20);
+        sf::FloatRect bounds = text.getLocalBounds();
+        text.setPosition(sf::Vector2f(pos.x+size.x/2-bounds.size.x/2, pos.y+size.y/2-bounds.size.y/2+size.y*j));
+        target.draw(text);
+        j++;
+    }
 }
