@@ -5,6 +5,9 @@
 #include <iostream>
 #include <cmath>
 
+// cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+//cmake --build build
+
 float GetFps(std::vector<float> list){
     float total = 0;
     for (int i = 0; i < list.size(); i++){

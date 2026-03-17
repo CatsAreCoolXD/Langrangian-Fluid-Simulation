@@ -585,7 +585,7 @@ void Simulation::Draw(sf::RenderTexture& target){
     sf::Vector2i mouseCell = Simulation::PosToCellPos(sf::Mouse::getPosition());
     sf::Vertex *vertexes = new sf::Vertex[particlesCount*6];
     
-    for (int i = 0; i < particlesCount; ++i) {
+    for (int i = 0; i < particlesCount; ++i) { // Draw every particle as a quad
         const Vec2& pos = particles[i].position;
 
         sf::Vertex* quad = &vertexes[i*6];
@@ -604,30 +604,29 @@ void Simulation::Draw(sf::RenderTexture& target){
         quad[4].position = bl; quad[4].color = color;
         quad[5].position = tl; quad[5].color = color;
     }
+    if (!particleVertexes.create(particlesCount*6)) std::cerr << "Couldn't create vertex buffer\n";
     if (!particleVertexes.update(vertexes)) std::cerr << "Couldn't update vertex buffer\n";
     delete[] vertexes;
 
-    if (circles.size()*circleSegments*3 != circleVertexes.getVertexCount()){ // Only update when adding new circles
-        const sf::Color circleColor = sf::Color::White;
-        sf::Vertex *vertexesCircle = new sf::Vertex[circles.size()*circleSegments*3];
-        float step = 2.f * 3.14159f / circleSegments;
-        for (int i = 0; i < circles.size(); i++){
-            sf::Vertex* circle = &vertexesCircle[i*circleSegments*3];
-            Vec2 center = circles[i];
-            for (int x = 0; x < circleSegments; x++){
-                Vec2 pos1 = center + Vec2(std::sin(x * step), std::cos(x * step)) * circleRadius;
-                Vec2 pos2 = center + Vec2(std::sin((x + 1) * step), std::cos((x + 1) * step)) * circleRadius;
+    const sf::Color circleColor = sf::Color::White;
+    sf::Vertex *vertexesCircle = new sf::Vertex[circles.size()*circleSegments*3];
+    float step = 2.f * 3.14159f / circleSegments;
+    for (int i = 0; i < circles.size(); i++){ // Draw every circle
+        sf::Vertex* circle = &vertexesCircle[i*circleSegments*3];
+        Vec2 center = circles[i];
+        for (int x = 0; x < circleSegments; x++){
+            Vec2 pos1 = center + Vec2(std::sin(x * step), std::cos(x * step)) * circleRadius;
+            Vec2 pos2 = center + Vec2(std::sin((x + 1) * step), std::cos((x + 1) * step)) * circleRadius;
 
-                int v = x * 3;
-                circle[v].position = center; circle[v].color = circleColor;
-                circle[v+1].position = pos1; circle[v+1].color = circleColor;
-                circle[v+2].position = pos2; circle[v+2].color = circleColor;
-            }
+            int v = x * 3;
+            circle[v].position = center; circle[v].color = circleColor;
+            circle[v+1].position = pos1; circle[v+1].color = circleColor;
+            circle[v+2].position = pos2; circle[v+2].color = circleColor;
         }
-        if (!circleVertexes.create(circles.size() * circleSegments * 3)) std::cerr << "Couldn't create circle vertex buffer\n";
-        if (!circleVertexes.update(vertexesCircle)) std::cerr << "Couldn't update circle vertex buffer\n";
-        delete[] vertexesCircle;
     }
+    if (!circleVertexes.create(circles.size() * circleSegments * 3)) std::cerr << "Couldn't create circle vertex buffer\n";
+    if (!circleVertexes.update(vertexesCircle)) std::cerr << "Couldn't update circle vertex buffer\n";
+    delete[] vertexesCircle;
 
     target.draw(particleVertexes);
     target.draw(circleVertexes);
