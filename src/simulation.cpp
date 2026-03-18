@@ -311,11 +311,7 @@ float Simulation::CalculateSharedPressure(float pressure1, float pressure2){
 
 Vec2 Simulation::CalculatePressureViscosityForce(Particle* particle){
     Vec2 pos = particle->predictedPosition;
-    Vec2 vel = particle->velocity;;
-    const float density = particle->density;
-    const float pressure = particle->pressure;
-    const float invDensity = 1.f / density;
-    const float radius2 = smoothingRadius2;
+    Vec2 vel = particle->velocity;
 
     sf::Vector2i cellPos = Simulation::PosToCellPos(pos);
     std::vector<int> neighbors = Simulation::GetNeighborCells(cellPos);
@@ -329,24 +325,25 @@ Vec2 Simulation::CalculatePressureViscosityForce(Particle* particle){
 
             for (int i = 0; i < indexes.size(); i++){
                 if (indexes[i] == particle->index) continue;
-                Particle& otherParticle = particles[indexes[i]];
+                Particle* otherParticle = &particles[indexes[i]];
                 
-                Vec2 delta = otherParticle.predictedPosition - pos;
+                Vec2 delta = otherParticle->predictedPosition - pos;
                 float distanceSquared = abs(delta.dot(delta));
-                if (distanceSquared > radius2) continue;
+                if (distanceSquared > smoothingRadius2) continue;
                 float distance = std::sqrt(distanceSquared);
 
                 Vec2 direction = distanceSquared > 0 ? delta / distance : Vec2(0, 1);
 
-                float slope = useKernelLookups ? Simulation::SpikyDerivativeLookup(distance) : Simulation::SpikyDerivative(distance);
+                float slope = Simulation::SpikyDerivativeLookup(distance);
 
-                float sharedPressure = Simulation::CalculateSharedPressure(pressure, otherParticle.pressure);
-                Vec2 force = -direction * sharedPressure * slope * particleMass * invDensity;
+                float sharedPressure = Simulation::CalculateSharedPressure(particle->pressure, otherParticle->pressure);
+                Vec2 force = -direction * sharedPressure * slope * particleMass / particle->density;
                 if (viscosity != 0.f){
-                    float viscosityInfluence = useKernelLookups ? Simulation::ViscosityKernelLookup(distance) : Simulation::ViscosityKernel(distance);
-                    force += (otherParticle.velocity - vel) * viscosityInfluence * viscosity;
+                    float viscosityInfluence = Simulation::ViscosityKernelLookup(distance);
+                    force += (otherParticle->velocity - vel) * viscosityInfluence * viscosity;
                 }
                 totalForce += force;
+                otherParticle->acceleration += -force / particleMass;
             }
         }
     }
@@ -366,7 +363,7 @@ Vec2 Simulation::GetInteractionForce(int particleIndex){
     Vec2 offset = Vec2(mousePos) - particles[particleIndex].position;
     float sqrDist = offset.lengthSquared();
 
-    if (sqrDist < radius * radius){
+    if (sqrDist < smoothingRadius2){
         float dst = std::sqrt(sqrDist);
         Vec2 dirToInputPoint = offset / dst;
         float centreT = 1 - dst / radius;
@@ -428,7 +425,7 @@ fState eval(const State& state, float gravity, float mass){
 
 void Simulation::ApplyMovements(){
     for (int i = 0; i < particlesCount; i++){
-        #ifndef USE_RK4
+        #ifndef USE_RK4 // Use leapfrog instead
         particles[i].position += particles[i].velocity * deltaTime + particles[i].acceleration * 0.5f * deltaTime * deltaTime;
         #endif
         
@@ -540,7 +537,7 @@ void Simulation::Update(){
     }
 
     clock2.restart();
-    deltaTime /= simulationSteps;
+    deltaTime /= simulationSteps; // Deltatime is set by the main function with Simulation::SetDeltatime
     deltaTime *= timeMultiplier;
     for (int i = 0; i < simulationSteps; i++){
 

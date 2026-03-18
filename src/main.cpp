@@ -28,14 +28,14 @@ int main()
     }
 
     std::cout << "Initializing simulation\n";
-    int particleCount = 8192;
+    int particleCount = 10000; // Best: 8192 particles.
     float particleMass = 1;
-    float smoothingRadius = 25;
-    float targetDensity = 0.007f;
+    float smoothingRadius = 25; // For 8k particles, 25 gives the best results.
+    float targetDensity = 0.007f; // For 8k particles, 0.007 gives the best results.
     float pressureMultiplier = 10000.f;
     float gravity = 9.81f;
     float viscosity = 0.35f;
-    int simulationSteps = 3;
+    int simulationSteps = 4;
     int mode = SIMULATION;
     Simulation sim(particleCount, particleMass, smoothingRadius, targetDensity, pressureMultiplier, gravity, viscosity, simulationSteps);
     sim.SetDeltatime(1.f / 120.f);
@@ -59,13 +59,13 @@ int main()
     Slider pressureMultiplierSlider(&newPressureMultiplier, 1, 100000, sf::Vector2f(200, 5), sf::Vector2f(1600, 125), "Pressure Multiplier");
     
     float newViscosity = viscosity;
-    Slider viscositySlider(&newViscosity, 0, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 200), "Viscosity");
+    Slider viscositySlider(&newViscosity, 0, 10, sf::Vector2f(200, 5), sf::Vector2f(1600, 200), "Viscosity");
     
     float newGravity = gravity;
     Slider gravitySlider(&newGravity, -20, 20, sf::Vector2f(200, 5), sf::Vector2f(1600, 275), "Gravity");
     
     float newTimeMultiplier = 1.f;
-    Slider timeSlider(&newTimeMultiplier, 0, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 350), "Time Multiplier");
+    Slider timeSlider(&newTimeMultiplier, -1, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 350), "Time Multiplier");
 
     bool useGravity = true;
     CheckBox gravityCheckBox(&useGravity, "Use Gravity", sf::Vector2f(1550, 425), sf::Vector2f(11,11));
@@ -109,6 +109,7 @@ int main()
                     settingsWindow = !settingsWindow;
                 } else if (keyEvent->scancode == sf::Keyboard::Scancode::Tab){
                     mode = (mode + 1) % 2;
+                    sim.SetMode(mode);
                 } else if (mode == PLAYGROUND && keyEvent->scancode == sf::Keyboard::Scancode::E){
                     spawnParticles = !spawnParticles;
                     sim.EnableParticleSpawner(spawnParticles);

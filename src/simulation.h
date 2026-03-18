@@ -97,7 +97,7 @@ class Simulation {
         std::vector<std::vector<int>> circleGrid;
 
         void SpawnParticle(Particle& particle);
-        const int MAX_PARTICLES = 10000;
+        const int MAX_PARTICLES = 20000;
 
         float timeElapsedSinceLastSpawn = 0.0f;
         float spawnsPerSecond = 500.f;
