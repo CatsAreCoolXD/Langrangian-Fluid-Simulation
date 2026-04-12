@@ -563,8 +563,8 @@ sf::Color lerp(sf::Color a, sf::Color b, float t){
 }
 
 sf::Color Simulation::GetParticleColor(int i){
-    float speed = particles[i].velocity.length();
-    float maxSpeed = 1000.f;
+    float speed = abs(particles[i].velocity.length());
+    float maxSpeed = 750.f;
     float gradient = std::min(speed / maxSpeed, 1.f);
 
     if (gradient < 0.5) return lerp(sf::Color::Blue, sf::Color::Cyan, gradient*2);

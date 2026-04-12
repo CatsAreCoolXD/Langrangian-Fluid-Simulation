@@ -39,7 +39,6 @@ int main()
     int mode = SIMULATION;
     Simulation sim(particleCount, particleMass, smoothingRadius, targetDensity, pressureMultiplier, gravity, viscosity, simulationSteps);
     sim.SetDeltatime(1.f / 120.f);
-    sim.Update();
     std::cout << "Initialized simulation\n";
 
     bool paused = true, settingsWindow = false, spawnParticles = false;
