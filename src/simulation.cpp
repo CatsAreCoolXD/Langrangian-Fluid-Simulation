@@ -10,62 +10,15 @@
 #include <future>
 #include "ctpl_stl.h" // Threadpool library
 
-Simulation::Simulation(int particlesCount, float particleMass, float smoothingRadius, float targetDensity, float pressureMultiplier, float gravity, float viscosity, int simulationSteps) : particlesCount(particlesCount), initialParticlesCount(particlesCount),
-        particleMass(particleMass), smoothingRadius(smoothingRadius), targetDensity(targetDensity), pressureMultiplier(pressureMultiplier), gravity(gravity), viscosity(viscosity), simulationSteps(simulationSteps), threadPool(std::thread::hardware_concurrency())
+#define PI 3.14159f
+
+Simulation::Simulation(int particlesCount, float particleMass, float smoothingRadius, float targetDensity, float pressureMultiplier, float nearPressureMultiplier, float gravity, float viscosity, int simulationSteps) : particlesCount(particlesCount), initialParticlesCount(particlesCount),
+        particleMass(particleMass), smoothingRadius(smoothingRadius), targetDensity(targetDensity), pressureMultiplier(pressureMultiplier), nearPressureMultiplier(nearPressureMultiplier), gravity(gravity), viscosity(viscosity), simulationSteps(simulationSteps), threadPool(std::thread::hardware_concurrency())
 {
     std::cout << "Threads: " << threadPool.size() << std::endl;
-    particles = new Particle[particlesCount];
-    if (true){ // Enable if you want the particles to spawn in a square
-        const float spawnSquareSize = 1024;
-        const Vec2 topLeft = Vec2(1920 / 2 - spawnSquareSize / 2, 1080 / 2 - spawnSquareSize / 2);
-        int grid = std::ceil(std::sqrt(particlesCount));
-        const float stepSize = spawnSquareSize / grid;
-        int i = 0;
-        for (int x = 0; x < grid && i < particlesCount; x++){
-            for (int y = 0; y < grid && i < particlesCount; y++){
-                Vec2 pos = topLeft + Vec2(y * stepSize, x * stepSize);
-                Particle p(pos, i);
-                particles[i] = p;
-                i++;
-            }
-        }
-    }
-    else {
-        srand(0);
-        for (int i = 0; i < particlesCount; i++){
-            Vec2 randomPos(rand() % 1920, rand() % 1080);
-            Particle p(randomPos, i);
-            particles[i] = p;
-        }
-    }
-    std::cout << "Spawned " << particlesCount << " particles\n";
+    Simulation::CreateParticles();
 
-    invSmoothingRadius = 1.f / smoothingRadius;
-    smoothingRadius2 = smoothingRadius * smoothingRadius;
-    invSmoothingRadius2 = 1.f / smoothingRadius2;
-
-    cells = std::ceil(1920 / smoothingRadius) * std::ceil(1080 / smoothingRadius);
-    smoothingKernelNormalization = 40.f / (7 * 3.14159f * smoothingRadius * smoothingRadius); // 2 dimensions
-    poly6Normalization = (4.f / (3.14159f * pow(smoothingRadius, 8)));
-    spikyNormalization = (10.f / (3.14159f * pow(smoothingRadius, 5)));
-    spikyDerivativeNormalization = -30.f / (3.14159f * pow(smoothingRadius, 5));
-    viscosityKernelNormalization = (3.14159f * pow(smoothingRadius, 8)) / 4;
-
-    std::cout << "Precomputed kernel normalizations\n";
-
-    poly6Lookup.resize(lookupSize+1, 0.f);
-    spikyDerivativeLookup.resize(lookupSize+1, 0.f);
-    viscosityKernelLookup.resize(lookupSize+1, 0.f);
-    float lookupSizef = lookupSize;
-    for (int i = 0; i < lookupSize+1; i++){
-        float iF = i;
-        float q2 = iF / lookupSize;
-        float r = std::sqrt(q2) * smoothingRadius;
-        poly6Lookup.at(i) = Simulation::Poly6(r);
-        spikyDerivativeLookup.at(i) = Simulation::SpikyDerivative(iF / lookupSizef * smoothingRadius);
-        viscosityKernelLookup.at(i) = Simulation::ViscosityKernel(iF / lookupSizef * smoothingRadius);
-    }
-    std::cout << "Precomputed kernel lookup tables\n";
+    Simulation::CalculateConstants();
 
     particleVertexes = sf::VertexBuffer(sf::PrimitiveType::Triangles, sf::VertexBuffer::Usage::Stream);
     circleVertexes = sf::VertexBuffer(sf::PrimitiveType::Triangles, sf::VertexBuffer::Usage::Dynamic);
@@ -80,32 +33,87 @@ Simulation::Simulation(int particlesCount, float particleMass, float smoothingRa
         newText.setPosition(Vec2(10, std::round(i*characterSize*2+50)));
         debugText.at(i) = newText;
     }
-
-    horizontalCells = std::ceil(1920.f / smoothingRadius);
-    verticalCells = std::ceil(1080.f / smoothingRadius);
-    circleGrid.clear();
-    circleGrid.resize(horizontalCells * verticalCells);
 }
 
 void Simulation::Reset(){
+    paused = true;
+    Simulation::CreateParticles();
+    Simulation::CalculateConstants();
+
     circleGrid.clear();
     circleGrid.resize(horizontalCells * verticalCells);
     circles.clear();
-    if (mode == SIMULATION){ // Enable if you want the particles to spawn in a square
-        particlesCount = initialParticlesCount;
+}
+
+void Simulation::CalculateConstants(){
+    invSmoothingRadius = 1.f / smoothingRadius;
+    smoothingRadius2 = smoothingRadius * smoothingRadius;
+    invSmoothingRadius2 = 1.f / smoothingRadius2;
+
+    cells = std::ceil(1920 / smoothingRadius) * std::ceil(1080 / smoothingRadius);
+    smoothingKernelNormalization = 40.f / (7 * PI * smoothingRadius * smoothingRadius);
+    poly6Normalization = (4.f / (PI * pow(smoothingRadius, 8)));
+    spikyNormalization = (10.f / (PI * pow(smoothingRadius, 5)));
+    spikyDerivativeNormalization = -30.f / (PI * pow(smoothingRadius, 5));
+    viscosityKernelNormalization = (PI * pow(smoothingRadius, 8)) / 4;
+    SpikyPow3Normalization = 10 / (PI * pow(smoothingRadius, 5));
+    SpikyPow3DerivativeNormalization = 30 / (pow(smoothingRadius, 5) * PI);
+
+    poly6Lookup.resize(lookupSize+1, 0.f);
+    spikyDerivativeLookup.resize(lookupSize+1, 0.f);
+    viscosityKernelLookup.resize(lookupSize+1, 0.f);
+    spikyKernelPow3Lookup.resize(lookupSize+1, 0.f);
+    derivativeSpikyPow3Lookup.resize(lookupSize+1, 0.f);
+    float lookupSizeFloat = lookupSize;
+    for (int i = 0; i < lookupSize+1; i++){
+        float iFloat = i;
+        float dstSquared = iFloat / lookupSizeFloat;
+        float dst = std::sqrt(dstSquared) * smoothingRadius;
+        poly6Lookup.at(i) = Simulation::Poly6(dst);
+        spikyDerivativeLookup.at(i) = Simulation::SpikyDerivative(dstSquared * smoothingRadius);
+        viscosityKernelLookup.at(i) = Simulation::ViscosityKernel(dstSquared * smoothingRadius);
+        spikyKernelPow3Lookup.at(i) = Simulation::SpikyKernelPow3(dst);
+        derivativeSpikyPow3Lookup.at(i) = Simulation::DerivativeSpikyPow3(dstSquared * smoothingRadius);
+    }
+
+    horizontalCells = std::ceil(1920.f / smoothingRadius);
+    verticalCells = std::ceil(1080.f / smoothingRadius);
+    
+    circleGrid.clear();
+    circleGrid.resize(horizontalCells * verticalCells);
+
+    for (int i = 0; i < circles.size(); i++) {
+        Vec2& circle = circles.at(i);
+        sf::Vector2i cellPos = Simulation::PosToCellPos(circle);
+        circleGrid[cellPos.y * horizontalCells + cellPos.x].push_back(i);
+    }
+}
+
+void Simulation::CreateParticles(){
+    if (mode == SIMULATION){
+        bool spawnParticlesInSquareShape = true;
         delete[] particles;
         particles = new Particle[particlesCount];
-        const float spawnSquareSize = 1024;
-        const Vec2 topLeft = Vec2(1920 / 2 - spawnSquareSize / 2, 1080 / 2 - spawnSquareSize / 2);
-        int grid = std::ceil(std::sqrt(particlesCount));
-        const float stepSize = spawnSquareSize / grid;
-        int i = 0;
-        for (int x = 0; x < grid && i < particlesCount; x++){
-            for (int y = 0; y < grid && i < particlesCount; y++){
-                Vec2 pos = topLeft + Vec2(y * stepSize, x * stepSize);
-                Particle p(pos, i);
+        if (spawnParticlesInSquareShape){
+            const Vec2 topLeft = startingPosition - Vec2(spawnSquareSize / 2, spawnSquareSize / 2);
+            int grid = std::ceil(std::sqrt(particlesCount));
+            const float stepSize = spawnSquareSize / grid;
+            int i = 0;
+            for (int x = 0; x < grid && i < particlesCount; x++){
+                for (int y = 0; y < grid && i < particlesCount; y++){
+                    Vec2 pos = topLeft + Vec2(y * stepSize, x * stepSize);
+                    Particle p(pos, i);
+                    particles[i] = p;
+                    i++;
+                }
+            }
+        }
+        else {
+            srand(time(NULL));
+            for (int i = 0; i < particlesCount; i++){
+                Vec2 randomPos(rand() % 1920, rand() % 1080);
+                Particle p(randomPos, i);
                 particles[i] = p;
-                i++;
             }
         }
     } else if (mode == PLAYGROUND){
@@ -115,9 +123,22 @@ void Simulation::Reset(){
     }
 }
 
+void Simulation::SetParticlesAmount(int amount) {
+    if (amount == particlesCount) return; // Only update if the particles count changed
+    particlesCount = amount;
+    Simulation::CreateParticles();
+}
+
+void Simulation::SetSmoothingRadius(float radius) {
+    if (radius == smoothingRadius) return; // Only update if the smoothing radius changed
+    smoothingRadius = radius;
+    Simulation::CalculateConstants();
+}
+
 void Simulation::SpawnParticle(Particle& particle){
     if (particlesCount+1 == MAX_PARTICLES) {
         std::cerr << "Error: Max particles reached: " << MAX_PARTICLES << std::endl;
+        spawnParticles = false;
         return;
     }
     
@@ -177,17 +198,12 @@ float Simulation::Poly6(float dst){
     } else return 0;
 }
 
-// float Simulation::Spiky(float dst){
-//     float x = smoothingRadius - dst;
-//     return spikyNormalization * x*x*x;
-// }
-
 float Simulation::SpikyDerivative(float dst){
     float x = smoothingRadius - dst;
     return spikyDerivativeNormalization * x * x;
 
     #ifdef OTHER_SPIKY_DERIVATIVE
-    const float SpikyPow2DerivativeScalingFactor = 12.f / (pow(smoothingRadius, 4) * 3.14159f);
+    const float SpikyPow2DerivativeScalingFactor = 12.f / (pow(smoothingRadius, 4) * PI);
     if (dst <= smoothingRadius)
 	{
 		float v = smoothingRadius - dst;
@@ -204,6 +220,26 @@ float Simulation::SpikyDerivative(float dst){
         return -6 * x*x * (smoothingKernelNormalization / smoothingRadius);
     } else return 0;
     #endif
+}
+
+float Simulation::SpikyKernelPow3(float dst)
+{
+	if (dst < smoothingRadius)
+	{
+		float v = smoothingRadius - dst;
+		return v * v * v * SpikyPow3Normalization;
+	}
+	return 0;
+}
+
+float Simulation::DerivativeSpikyPow3(float dst)
+{
+	if (dst <= smoothingRadius)
+	{
+		float v = smoothingRadius - dst;
+		return -v * v * SpikyPow3DerivativeNormalization;
+	}
+	return 0;
 }
 
 float Simulation::ViscosityKernel(float dst){
@@ -226,9 +262,19 @@ float Simulation::ViscosityKernelLookup(float dst){
     return viscosityKernelLookup[index];
 }
 
+float Simulation::SpikyKernelPow3Lookup(float dstSquared){
+    int index = int(dstSquared * invSmoothingRadius2 * lookupSize);
+    return spikyKernelPow3Lookup[index];
+}
+
+float Simulation::DerivativeSpikyPow3Lookup(float dst){
+    int index = int(dst * invSmoothingRadius * lookupSize);
+    return derivativeSpikyPow3Lookup[index];
+}
+
 float Simulation::GetParticleInfluence(int p1, int p2){
     float distanceSquared = Vec2(particles[p1].position - particles[p2].position).lengthSquared();
-    return useKernelLookups ? Simulation::Poly6Lookup(distanceSquared) : Simulation::Poly6(std::sqrt(distanceSquared));
+    return Simulation::Poly6Lookup(distanceSquared);
 }
 
 float Simulation::DensityToPressure(float density){
@@ -236,11 +282,17 @@ float Simulation::DensityToPressure(float density){
     return std::max(0.f, (x - 1.f) * pressureMultiplier);
 }
 
+float Simulation::NearDensityToNearPressure(float nearDensity){
+    float x = nearDensity / targetDensity;
+    return std::max(0.f, (x - 1.f) * nearPressureMultiplier);
+}
+
 void Simulation::ParallelCalculateDensities(int start, int end){
     for (int i = start; i < end; i++){
         Particle* particle = &particles[i];
         sf::Vector2i cellPos = Simulation::PosToCellPos(particle->position);
         float totalDensity = 0;
+        float totalNearDensity = 0;
         for (int dy = -1; dy <= 1; dy++){
             for (int dx = -1; dx <= 1; dx++){
                 int neighborCellPos = (cellPos.y + dy) * horizontalCells + (cellPos.x + dx);
@@ -254,13 +306,16 @@ void Simulation::ParallelCalculateDensities(int start, int end){
                     float distanceSquared = abs(delta.dot(delta));
                     if (distanceSquared > smoothingRadius2) continue;
 
-                    float influence = useKernelLookups ? Simulation::Poly6Lookup(distanceSquared) : Simulation::Poly6(std::sqrt(distanceSquared));
-                    totalDensity += particleMass * influence;
+                    float densityInfluence = Simulation::Poly6Lookup(distanceSquared);
+                    float nearDensityInfluence = Simulation::SpikyKernelPow3Lookup(distanceSquared);
+                    totalDensity += particleMass * densityInfluence;
+                    totalNearDensity += particleMass * nearDensityInfluence;
                 }
             }
         }
         particle->density = totalDensity;
         particle->pressure = Simulation::DensityToPressure(totalDensity);
+        particle->nearPressure = Simulation::NearDensityToNearPressure(totalNearDensity);
     }
 }
 
@@ -277,32 +332,6 @@ void Simulation::CalculateDensities(int threadCount){
     }
 
     for (auto& f : futures) f.get();
-}
-
-float Simulation::DensityAtPoint(Vec2 pos){
-    sf::Vector2i cellPos = Simulation::PosToCellPos(pos);
-    std::vector<int> neighbors = Simulation::GetNeighborCells(cellPos);
-
-    float totalDensity = 0;
-    for (int dy = -1; dy <= 1; dy++){
-        for (int dx = -1; dx <= 1; dx++){
-            int neighborCellPos = (cellPos.y + dy) * horizontalCells + (cellPos.x + dx);
-            if (neighborCellPos < 0 || neighborCellPos >= grid.size()) continue;
-            const std::vector<int>& indexes = grid[neighborCellPos];
-
-            for (int i = 0; i < indexes.size(); i++){
-                Particle* otherParticle = &particles[indexes[i]];
-
-                Vec2 delta = otherParticle->predictedPosition - pos;
-                float distanceSquared = abs(delta.dot(delta));
-                if (distanceSquared > smoothingRadius2) continue;
-
-                float influence = useKernelLookups ? Simulation::Poly6Lookup(distanceSquared) : Simulation::Poly6(std::sqrt(distanceSquared));
-                totalDensity += particleMass * influence;
-            }
-        }
-    }
-    return totalDensity;
 }
 
 float Simulation::CalculateSharedPressure(float pressure1, float pressure2){
@@ -330,20 +359,25 @@ Vec2 Simulation::CalculatePressureViscosityForce(Particle* particle){
                 Vec2 delta = otherParticle->predictedPosition - pos;
                 float distanceSquared = abs(delta.dot(delta));
                 if (distanceSquared > smoothingRadius2) continue;
+
                 float distance = std::sqrt(distanceSquared);
 
                 Vec2 direction = distanceSquared > 0 ? delta / distance : Vec2(0, 1);
 
                 float slope = Simulation::SpikyDerivativeLookup(distance);
+                float nearSlope = Simulation::DerivativeSpikyPow3Lookup(distance);
 
                 float sharedPressure = Simulation::CalculateSharedPressure(particle->pressure, otherParticle->pressure);
+                float sharedNearPressure = Simulation::CalculateSharedPressure(particle->nearPressure, otherParticle->nearPressure);
+                
                 Vec2 force = -direction * sharedPressure * slope * particleMass / particle->density;
+                force += -direction * sharedNearPressure * nearSlope * particleMass / particle->density;
                 if (viscosity != 0.f){
                     float viscosityInfluence = Simulation::ViscosityKernelLookup(distance);
                     force += (otherParticle->velocity - vel) * viscosityInfluence * viscosity;
                 }
                 totalForce += force;
-                otherParticle->acceleration += -force / particleMass;
+                //otherParticle->acceleration += -force / particleMass;
             }
         }
     }
@@ -403,59 +437,9 @@ void Simulation::CalculatePressureViscosityForces(int threadCount){
     for (auto& f : futures) f.get();
 }
 
-//#define USE_RK4
-#ifdef USE_RK4
-struct State {
-    Vec2 pos;
-    Vec2 vel;
-};
-
-struct fState {
-    Vec2 dPos;
-    Vec2 dVel;
-};
-
-fState eval(const State& state, float gravity, float mass){
-    fState out;
-    out.dPos = state.vel;
-    out.dVel = Vec2(0, -1) * mass * gravity;
-    return out;
-}
-#endif
-
 void Simulation::ApplyMovements(){
     for (int i = 0; i < particlesCount; i++){
-        #ifndef USE_RK4 // Use leapfrog instead
         particles[i].position += particles[i].velocity * deltaTime + particles[i].acceleration * 0.5f * deltaTime * deltaTime;
-        #endif
-        
-        #ifdef USE_RK4
-
-        State s1;
-        s1.pos = particles[i].position;
-        s1.vel = particles[i].velocity;
-
-        fState k1 = eval(s1, gravity, particleMass);
-
-        State s2;
-        s2.pos = s1.pos + k1.dPos * (deltaTime * 0.5f);
-        s2.vel = s1.vel + k1.dVel * (deltaTime * 0.5f);
-        fState k2 = eval(s2, gravity, particleMass);
-
-        State s3;
-        s3.pos = s1.pos + k2.dPos * (deltaTime * 0.5f);
-        s3.vel = s1.vel + k2.dVel * (deltaTime * 0.5f);
-        fState k3 = eval(s3, gravity, particleMass);
-
-        State s4;
-        s4.pos = s1.pos + k3.dPos * deltaTime;
-        s4.vel = s1.vel + k3.dVel * deltaTime;
-        fState k4 = eval(s4, gravity, particleMass);
-
-        particles[i].position += (k1.dPos + 2.f * k2.dPos + 2.f * k3.dPos + k4.dPos) * (deltaTime / 6.f);
-
-        #endif
-
         particles[i].velocity += particles[i].acceleration * deltaTime;
     }
 }
@@ -514,16 +498,43 @@ void Simulation::ResolveCollisions(){
 }
 
 void Simulation::HandleInputs(){
-    if (enableMouse && mode == PLAYGROUND && sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)){
-        sf::Vector2f mousePos = sf::Vector2f(sf::Mouse::getPosition());
+    if (!enableMouse) return;
+    sf::Vector2f mousePos = sf::Vector2f(sf::Mouse::getPosition());
+    if (mode == PLAYGROUND && sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)){
+        mousePos.x = std::clamp(mousePos.x, 1.f, 1919.f);
+        mousePos.y = std::clamp(mousePos.y, 1.f, 1079.f);
         circles.push_back(mousePos);
 
         sf::Vector2i cellPos = Simulation::PosToCellPos(mousePos);
         circleGrid[cellPos.y * horizontalCells + cellPos.x].push_back(circles.size()-1);
+    } else if (mode == PLAYGROUND && sf::Mouse::isButtonPressed(sf::Mouse::Button::Right)){
+        for (int i = 0; i < circles.size(); i++) {
+            Vec2& circle = circles.at(i);
+            if ((circle - mousePos).lengthSquared() > circleRadius*circleRadius*10) continue;
+            circles.erase(circles.begin()+i);
+        }
+        circleGrid.clear();
+        circleGrid.resize(horizontalCells * verticalCells);
+        for (int i = 0; i < circles.size(); i++) { // Reorganize the grid (this is so inefficient)
+            Vec2& circle = circles.at(i);
+            sf::Vector2i cellPos = Simulation::PosToCellPos(circle);
+            circleGrid[cellPos.y * horizontalCells + cellPos.x].push_back(i);
+        }
+    }
+
+    if (paused && mode == SIMULATION && sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
+        if (!mousePressed){
+            mousePressed = true;
+            originalMousePos = mousePos;
+            originalPosition = startingPosition;
+        }
+        startingPosition = originalPosition + mousePos - originalMousePos;
+        Simulation::CreateParticles();
     }
 }
 
 void Simulation::Update(){
+    if (paused) return;
     const int threadCount = threadPool.size();
 
     timeElapsedSinceLastSpawn += deltaTime;
@@ -544,10 +555,10 @@ void Simulation::Update(){
         Simulation::PredictPositions();
         Simulation::CalculateParticleLookups();
         Simulation::CalculateDensities(threadCount);
-        debugText.at(0).setString("Densities Calculation: " + std::to_string(clock2.restart().asMilliseconds()));
+        debugText.at(0).setString("Densities Calculation: " + std::to_string(clock2.restart().asMilliseconds()*simulationSteps));
 
         Simulation::CalculatePressureViscosityForces(threadCount);
-        debugText.at(1).setString("Pressure Forces Calculation: " + std::to_string(clock2.restart().asMilliseconds()));
+        debugText.at(1).setString("Pressure Forces Calculation: " + std::to_string(clock2.restart().asMilliseconds()*simulationSteps));
 
         Simulation::ApplyMovements();
         Simulation::ResolveCollisions();
@@ -608,7 +619,7 @@ void Simulation::Draw(sf::RenderTexture& target){
 
     const sf::Color circleColor = sf::Color::White;
     sf::Vertex *vertexesCircle = new sf::Vertex[circles.size()*circleSegments*3];
-    float step = 2.f * 3.14159f / circleSegments;
+    float step = 2.f * PI / circleSegments;
     for (int i = 0; i < circles.size(); i++){ // Draw every circle
         sf::Vertex* circle = &vertexesCircle[i*circleSegments*3];
         Vec2 center = circles[i];
@@ -640,7 +651,7 @@ void Simulation::Draw(sf::RenderTexture& target){
         target.draw(spawnRectangle);
     }
 
-    debugText.at(2).setString("Rendering: " + std::to_string(lastDelay).substr(0));
+    debugText.at(2).setString("Rendering: " + std::to_string(lastDelay));
     debugText.at(2).setPosition(Vec2(10, 2*characterSize*2+50));
     target.draw(debugText.at(2));
 

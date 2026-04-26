@@ -6,9 +6,9 @@
 #include <cmath>
 
 // cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-//cmake --build build
+// cmake --build build
 
-float GetFps(std::vector<float> list){
+float GetAverage(std::vector<float> list){ // Returns the average float in a list of floats
     float total = 0;
     for (int i = 0; i < list.size(); i++){
         total += list[i];
@@ -18,7 +18,13 @@ float GetFps(std::vector<float> list){
 
 int main()
 {
-    auto window = sf::RenderWindow(sf::VideoMode::getDesktopMode(), "Fluid Simulation", sf::State::Fullscreen);
+    // Window
+    std::cout << "Initiliazing window" << std::endl;
+    sf::ContextSettings settings;
+    settings.antiAliasingLevel = 8;
+    sf::RenderWindow window = sf::RenderWindow();
+    window.create(sf::VideoMode({1919, 1080}), "Fluid Simulation", sf::Style::None, sf::State::Windowed, settings);
+    std::cout << "Window created" << std::endl;
     window.setFramerateLimit(120);
     window.setView(window.getDefaultView());
 
@@ -27,21 +33,23 @@ int main()
         return 0;
     }
 
+    // Simulation
     std::cout << "Initializing simulation\n";
-    int particleCount = 10000; // Best: 8192 particles.
+    int particleCount = 8192; // Best: 8192 particles.
     float particleMass = 1;
     float smoothingRadius = 25; // For 8k particles, 25 gives the best results.
     float targetDensity = 0.007f; // For 8k particles, 0.007 gives the best results.
     float pressureMultiplier = 10000.f;
+    float nearPressureMultiplier = 10000.f;
     float gravity = 9.81f;
     float viscosity = 0.35f;
-    int simulationSteps = 4;
+    int simulationSteps = 5;
     int mode = SIMULATION;
-    Simulation sim(particleCount, particleMass, smoothingRadius, targetDensity, pressureMultiplier, gravity, viscosity, simulationSteps);
+    Simulation sim(particleCount, particleMass, smoothingRadius, targetDensity, pressureMultiplier, nearPressureMultiplier, gravity, viscosity, simulationSteps);
     sim.SetDeltatime(1.f / 120.f);
     std::cout << "Initialized simulation\n";
 
-    bool paused = true, settingsWindow = false, spawnParticles = false;
+    bool settingsWindow = false, spawnParticles = false;
 
     sf::RenderTexture render(sf::Vector2u(1920u, 1080u));
 
@@ -50,32 +58,44 @@ int main()
     sf::Font font("Fonts/OpenSans-Bold.ttf");
     sf::Text fpsText(font);
 
-    float sliderRange = 1;
-    float newTargetDensity = targetDensity;
-    Slider targetDensitySlider(&newTargetDensity, 0.0001, 0.02f, sf::Vector2f(200, 5), sf::Vector2f(1600, 50), "Target Density");
+    // Settings
+    float newTargetDensity = 1;
+    Slider targetDensitySlider(&newTargetDensity, 0.f, 10.f, sf::Vector2f(200, 5), sf::Vector2f(1600, 50), "Target Density");
 
-    float newPressureMultiplier = pressureMultiplier;
-    Slider pressureMultiplierSlider(&newPressureMultiplier, 1, 100000, sf::Vector2f(200, 5), sf::Vector2f(1600, 125), "Pressure Multiplier");
+    float newPressureMultiplier = 1;
+    Slider pressureMultiplierSlider(&newPressureMultiplier, 0, 10, sf::Vector2f(200, 5), sf::Vector2f(1600, 125), "Pressure Multiplier");
+    
+    float newNearPressureMultiplier = 1;
+    Slider nearPressureMultiplierSlider(&newNearPressureMultiplier, 0, 10, sf::Vector2f(200, 5), sf::Vector2f(1600, 200), "Near Pressure Multiplier");
     
     float newViscosity = viscosity;
-    Slider viscositySlider(&newViscosity, 0, 10, sf::Vector2f(200, 5), sf::Vector2f(1600, 200), "Viscosity");
+    Slider viscositySlider(&newViscosity, 0, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 275), "Viscosity");
     
     float newGravity = gravity;
-    Slider gravitySlider(&newGravity, -20, 20, sf::Vector2f(200, 5), sf::Vector2f(1600, 275), "Gravity");
+    Slider gravitySlider(&newGravity, -20, 20, sf::Vector2f(200, 5), sf::Vector2f(1600, 350), "Gravity");
     
     float newTimeMultiplier = 1.f;
-    Slider timeSlider(&newTimeMultiplier, -1, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 350), "Time Multiplier");
+    Slider timeSlider(&newTimeMultiplier, -1, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 425), "Time Multiplier");
 
     bool useGravity = true;
-    CheckBox gravityCheckBox(&useGravity, "Use Gravity", sf::Vector2f(1550, 425), sf::Vector2f(11,11));
-    
-    bool useKernelLookups = true;
-    CheckBox kernelLookupsCheckBox(&useKernelLookups, "Use Kernel Lookups", sf::Vector2f(1550, 500), sf::Vector2f(11,11));
+    CheckBox gravityCheckBox(&useGravity, "Use Gravity", sf::Vector2f(1550, 475), sf::Vector2f(11,11));
+
+    float newParticlesCount = particleCount;
+    Slider particlesSlider(&newParticlesCount, 1, 50000, sf::Vector2f(200, 5), sf::Vector2f(1600, 550), "Particles count");
+
+    float newSmoothingRadius = smoothingRadius;
+    Slider smoothingRadiusSlider(&newSmoothingRadius, 1, 50, sf::Vector2f(200, 5), sf::Vector2f(1600, 625), "Smoothing Radius");
+
+    float newSimulationSteps = simulationSteps;
+    Slider simulationStepsSlider(&newSimulationSteps, 1, 20, sf::Vector2f(200, 5), sf::Vector2f(1600, 700), "Simulation Steps");
+
+    float spawnSquareSize = 1024;
+    Slider spawnSlider(&spawnSquareSize, 1, 2048, sf::Vector2f(200, 5), sf::Vector2f(1600, 775), "Spawn Square Size");
 
     sf::Text settingsWindowText(font, "Press H to toggle settings window", 16);
     settingsWindowText.setPosition(sf::Vector2f(1600,5));
 
-    SelectionMenu modeMenu(&mode, {"Simulation", "Playground"}, sf::Vector2f(1550, 575), sf::Vector2f(250, 50));
+    SelectionMenu modeMenu(&mode, {"Simulation", "Playground"}, sf::Vector2f(1550, 850), sf::Vector2f(250, 50));
 
     std::vector<float> fpsList;
 
@@ -98,12 +118,11 @@ int main()
             }
             if (auto* keyEvent = event->getIf<sf::Event::KeyPressed>()){
                 if (keyEvent->scancode == sf::Keyboard::Scancode::Space){
-                    paused = !paused;
+                    sim.Pause();
                 } else if (keyEvent->scancode == sf::Keyboard::Scancode::Escape){
                     window.close();
                 } else if (keyEvent->scancode == sf::Keyboard::Scancode::R){
                     sim.Reset();
-                    paused = true;
                 } else if (keyEvent->scancode == sf::Keyboard::Scancode::H){
                     settingsWindow = !settingsWindow;
                 } else if (keyEvent->scancode == sf::Keyboard::Scancode::Tab){
@@ -121,17 +140,20 @@ int main()
         sim.SetInteractionAbility(!settingsWindow);
 
         sim.SetDeltatime(deltaTime);
-        if (!paused) sim.Update();
+        sim.Update();
         sim.HandleInputs();
         sim.Draw(render);
 
         if (!settingsWindow) render.draw(settingsWindowText);
         if (settingsWindow){
             targetDensitySlider.Draw(render, mousePos);
-            sim.SetTargetDensity(newTargetDensity);
+            sim.SetTargetDensity(newTargetDensity * targetDensity);
 
             pressureMultiplierSlider.Draw(render, mousePos);
-            sim.SetPressureMultiplier(newPressureMultiplier);
+            sim.SetPressureMultiplier(newPressureMultiplier * pressureMultiplier);
+
+            nearPressureMultiplierSlider.Draw(render, mousePos);
+            sim.SetNearPressureMultiplier(newNearPressureMultiplier * nearPressureMultiplier);
             
             viscositySlider.Draw(render, mousePos);
             sim.SetViscosity(newViscosity);
@@ -140,17 +162,26 @@ int main()
             gravityCheckBox.Draw(render, mousePos);
             sim.SetGravity(newGravity, useGravity);
 
-            kernelLookupsCheckBox.Draw(render, mousePos);
-            sim.SetKernelLookup(useKernelLookups);
-
             timeSlider.Draw(render, mousePos);
             sim.SetTimeMultiplier(newTimeMultiplier);
+
+            particlesSlider.Draw(render, mousePos);
+            if (mode == SIMULATION) sim.SetParticlesAmount(newParticlesCount);
+
+            smoothingRadiusSlider.Draw(render, mousePos);
+            sim.SetSmoothingRadius(newSmoothingRadius);
+
+            simulationStepsSlider.Draw(render, mousePos);
+            sim.SetSimulationSteps(newSimulationSteps);
+
+            spawnSlider.Draw(render, mousePos);
+            sim.SetStartingSize(spawnSquareSize);
 
             modeMenu.Draw(render, mousePos);
             sim.SetMode(mode);
         }
 
-        float avgFps = GetFps(fpsList);
+        float avgFps = GetAverage(fpsList);
         std::string fpsString = (std::string)"FPS: " + std::to_string(avgFps);
         fpsText.setString(fpsString);
         render.draw(fpsText);
