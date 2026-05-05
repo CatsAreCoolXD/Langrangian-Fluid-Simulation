@@ -4,44 +4,19 @@
 #include <thread>
 #include "ctpl_stl.h"
 
-class Vec2 {
-    public:
-        Vec2(float x, float y) : x(x), y(y) {}
-        Vec2(sf::Vector2f v) : x(v.x), y(v.y) {}
-        Vec2(sf::Vector2i v) : x(v.x), y(v.y) {}
-        Vec2() : x(0), y(0) {}
-        float x, y;
-        float dot(const Vec2& b) const { return x*b.x + y*b.y; }
-        float length() const { return std::sqrt(Vec2::dot(*this)); }
-        float lengthSquared() const { return Vec2::dot(*this); }
-        Vec2 operator+(const Vec2& right) const { return Vec2(x+right.x, y+right.y); }
-        Vec2 operator-(const Vec2& right) const { return Vec2(x-right.x, y-right.y); }
-        Vec2 operator/(float right) const { float inv = 1.f / right; return Vec2(x*inv, y*inv); }
-        Vec2 operator*(float right) const { return Vec2(x*right, y*right); }
-        Vec2 operator*(const Vec2& right) const { return Vec2(x*right.x, y*right.y); }
-        Vec2& operator+=(const Vec2& right) { x += right.x; y += right.y; return *this; }
-        Vec2& operator-=(const Vec2& right) { x -= right.x; y -= right.y; return *this; }
-        Vec2& operator*=(const Vec2& right) { x *= right.x; y *= right.y; return *this; }
-        Vec2& operator*=(const float right) { x *= right; y *= right; return *this; }
-        Vec2 operator-() const { return Vec2(-x, -y); }
-        operator sf::Vector2f() const { return sf::Vector2f(x, y); }
-};
-
-inline Vec2 operator*(float s, const Vec2& v) {
-    return v * s;
-}
-
 class Particle {
     public:
-        Particle(Vec2 position, int index) : position(position), index(index) {}
-        Particle() : position(Vec2()), index(0) {}
-        Vec2 position, predictedPosition, velocity, acceleration;
+        Particle(sf::Vector2f position, int index) : position(position), index(index) {}
+        Particle() : position(sf::Vector2f()), index(0) {}
+        sf::Vector2f position, predictedPosition, velocity, acceleration;
         float density, pressure, nearPressure;
         int index;
+        bool isStatic = false;
 };
 
 const int SIMULATION = 0;
 const int PLAYGROUND = 1;
+const int AERODYNAMICS = 2;
 
 class Simulation {
     public:
@@ -59,19 +34,51 @@ class Simulation {
         void Pause() { paused = !paused; }
 
         // Settings
-        void SetStartingSize(float size) { if (size != spawnSquareSize) { Simulation::Reset(); } spawnSquareSize = size; }
+        void SetStartingSize(float size) { if (size != spawnSquareSize && paused) { Simulation::Reset(); } spawnSquareSize = size; }
         void SetParticlesAmount(int amount);
         void SetSmoothingRadius(float radius);
         void SetSimulationSteps(int amount) { simulationSteps = amount; }
         void SetTargetDensity(float newTargetDensity) { targetDensity = newTargetDensity; }
         void SetPressureMultiplier(float newPressureMultiplier) { pressureMultiplier = newPressureMultiplier; }
         void SetNearPressureMultiplier(float newNearPressureMultiplier) { nearPressureMultiplier = newNearPressureMultiplier; }
-        void SetViscosity(float newViscosity) { viscosity = newViscosity; }
+        float& GetViscosity() { return viscosity; }
+        float& GetTimeMultiplier() { return timeMultiplier; }
+        float& GetParticlesRadius() { return particleRadius; }
+        float& GetSpawnsPerSecond() { return spawnsPerSecond; }
         void SetGravity(float newGravity, bool doGravity) { gravity = newGravity; enableGravity = doGravity; }
-        void SetTimeMultiplier(float newTimeMultiplier) { timeMultiplier = newTimeMultiplier; }
         void SetInteractionAbility(bool enable) { enableMouse = enable; } // Enable or disable the users ability to draw on the screen
-        void SetMode(bool newMode) { mode = newMode; }
-        void EnableParticleSpawner(bool enable) { spawnParticles = enable; }
+        void SetMode(int newMode) { mode = newMode; }
+        void ToggleParticleSpawner() { spawnParticles = !spawnParticles; }
+        int GetParticleCount() { return particlesCount; }
+
+        // Other
+        void SpawnParticle(Particle& particle);
+        void AddWhiteParticle() { whiteParticles.push_back(particlesCount); }
+
+        // Shapes (W.I.P)
+        class Shape {
+            public:
+                Shape(sf::Vector2f size, int density) : size(size), density(density) {}
+                Shape();
+                virtual std::vector<sf::Vector2f> GetPositions() const { return {}; }
+                void SetDensity(int newDensity) { density = newDensity; }
+                sf::Vector2f size;
+                int density;
+        };
+        class Circle : public Shape {
+            public: 
+                Circle(sf::Vector2f size, int density) : size(size), density(density) {}
+                std::vector<sf::Vector2f> GetPositions() const override;
+                sf::Vector2f size;
+                int density;
+        };
+        class Rectangle : public Shape {
+            public: 
+                Rectangle(sf::Vector2f size, int density) : size(size), density(density) {}
+                std::vector<sf::Vector2f> GetPositions() const override;
+                sf::Vector2f size;
+                int density;
+        };
     private:
         // Main variables
         int particlesCount, initialParticlesCount, simulationSteps;
@@ -84,20 +91,22 @@ class Simulation {
         // Settings
         int mode = SIMULATION;
         bool enableGravity = true, enableMouse = true, spawnParticles = false;
-        Vec2 startingPosition = Vec2(1920 / 2, 1080 / 2);
+        sf::Vector2f startingPosition = sf::Vector2f(1920 / 2, 1080 / 2);
         float spawnSquareSize = 1024;
 
         // Mouse drag info
-        Vec2 originalMousePos;
-        Vec2 originalPosition;
+        sf::Vector2f originalMousePos;
+        sf::Vector2f originalPosition;
         bool mousePressed = false;
 
         // Rendering
+        float particleRadius = 3;
         sf::VertexBuffer particleVertexes;
         sf::VertexBuffer circleVertexes;
         sf::Color GetParticleColor(int i);
         sf::Font font;
         std::vector<sf::Text> debugText;
+        std::vector<int> whiteParticles;
 
         // Time
         sf::Clock clock2;
@@ -111,13 +120,12 @@ class Simulation {
 
         // Playground mode circle settings
         const float circleRadius = 10.f;
-        std::vector<Vec2> circles;
+        std::vector<sf::Vector2f> circles;
 
         // Playground mode particle spawns
         float spawnRadius = 50;
         float timeElapsedSinceLastSpawn = 0.0f;
-        float spawnsPerSecond = 500.f;
-        void SpawnParticle(Particle& particle);
+        float spawnsPerSecond = 50.f;
         const int MAX_PARTICLES = 50000;
 
         // Grid
@@ -126,27 +134,27 @@ class Simulation {
         std::vector<std::vector<int>> grid;
         std::vector<std::vector<int>> circleGrid;
         int CellPosToKey(sf::Vector2i pos);
-        sf::Vector2i PosToCellPos(Vec2 pos);
+        sf::Vector2i PosToCellPos(sf::Vector2f pos);
 
         std::vector<int> GetNeighborCells(sf::Vector2i cellPos);
 
         // Important functions for calculations
         void PredictPositions();
         void CalculateParticleLookups();
-        void CalculateDensities(int threadCount);
-        void CalculatePressureViscosityForces(int threadCount);
+        void ParallelCalculateDensities(int threadCount);
+        void ParallelCalculatePressureViscosityForces(int threadCount);
         void ApplyMovements();
         void ResolveCollisions();
-        Vec2 CalculateParticleForces(Particle* particle);
+        sf::Vector2f CalculateParticleForces(Particle* particle);
         float GetParticleInfluence(int p1, int p2);
-        Vec2 CalculatePressureViscosityForce(Particle* particle);
+        sf::Vector2f CalculatePressureViscosityForce(Particle* particle);
         float DensityToPressure(float density);
         float NearDensityToNearPressure(float nearDensity);
         float CalculateSharedPressure(float pressure1, float pressure2);
-        Vec2 GetInteractionForce(int particleIndex);
+        sf::Vector2f GetExternalForces(int particleIndex);
 
-        void ParallelCalculateForces(int start, int end);
-        void ParallelCalculateDensities(int start, int end);
+        void CalculateForces(int start, int end);
+        void CalculateDensities(int start, int end);
         
         // Smoothing functions
         float smoothingKernelNormalization, poly6Normalization, spikyNormalization, spikyDerivativeNormalization, viscosityKernelNormalization, SpikyPow3Normalization, SpikyPow3DerivativeNormalization;

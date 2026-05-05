@@ -30,7 +30,7 @@ Simulation::Simulation(int particlesCount, float particleMass, float smoothingRa
     for (int i = 0; i < 3; i++) {
         sf::Text newText(font, "default text", characterSize);
         newText.setFillColor(sf::Color::White);
-        newText.setPosition(Vec2(10, std::round(i*characterSize*2+50)));
+        newText.setPosition(sf::Vector2f(10, std::round(i*characterSize*2+50)));
         debugText.at(i) = newText;
     }
 }
@@ -83,25 +83,25 @@ void Simulation::CalculateConstants(){
     circleGrid.resize(horizontalCells * verticalCells);
 
     for (int i = 0; i < circles.size(); i++) {
-        Vec2& circle = circles.at(i);
+        sf::Vector2f& circle = circles.at(i);
         sf::Vector2i cellPos = Simulation::PosToCellPos(circle);
         circleGrid[cellPos.y * horizontalCells + cellPos.x].push_back(i);
     }
 }
 
 void Simulation::CreateParticles(){
+    delete[] particles;
+    particles = new Particle[MAX_PARTICLES];
     if (mode == SIMULATION){
         bool spawnParticlesInSquareShape = true;
-        delete[] particles;
-        particles = new Particle[particlesCount];
         if (spawnParticlesInSquareShape){
-            const Vec2 topLeft = startingPosition - Vec2(spawnSquareSize / 2, spawnSquareSize / 2);
+            const sf::Vector2f topLeft = startingPosition - sf::Vector2f(spawnSquareSize / 2, spawnSquareSize / 2);
             int grid = std::ceil(std::sqrt(particlesCount));
             const float stepSize = spawnSquareSize / grid;
             int i = 0;
             for (int x = 0; x < grid && i < particlesCount; x++){
                 for (int y = 0; y < grid && i < particlesCount; y++){
-                    Vec2 pos = topLeft + Vec2(y * stepSize, x * stepSize);
+                    sf::Vector2f pos = topLeft + sf::Vector2f(y * stepSize, x * stepSize);
                     Particle p(pos, i);
                     particles[i] = p;
                     i++;
@@ -111,20 +111,18 @@ void Simulation::CreateParticles(){
         else {
             srand(time(NULL));
             for (int i = 0; i < particlesCount; i++){
-                Vec2 randomPos(rand() % 1920, rand() % 1080);
+                sf::Vector2f randomPos(rand() % 1920, rand() % 1080);
                 Particle p(randomPos, i);
                 particles[i] = p;
             }
         }
-    } else if (mode == PLAYGROUND){
+    } else if (mode == PLAYGROUND || mode == AERODYNAMICS){
         particlesCount = 0;
-        delete[] particles;
-        particles = new Particle[MAX_PARTICLES];
     }
 }
 
 void Simulation::SetParticlesAmount(int amount) {
-    if (amount == particlesCount) return; // Only update if the particles count changed
+    if (amount == particlesCount || !paused) return; // Only update if the particles count changed and if the simulation is paused
     particlesCount = amount;
     Simulation::CreateParticles();
 }
@@ -152,7 +150,7 @@ int Simulation::CellPosToKey(sf::Vector2i cellPos){
     return abs(key);
 }
 
-sf::Vector2i Simulation::PosToCellPos(Vec2 pos){
+sf::Vector2i Simulation::PosToCellPos(sf::Vector2f pos){
     int cellX = std::clamp((int)(pos.x * invSmoothingRadius), 0, horizontalCells - 1);
     int cellY = std::clamp((int)(pos.y * invSmoothingRadius), 0, verticalCells - 1);
     return sf::Vector2i(cellX, cellY);
@@ -273,7 +271,7 @@ float Simulation::DerivativeSpikyPow3Lookup(float dst){
 }
 
 float Simulation::GetParticleInfluence(int p1, int p2){
-    float distanceSquared = Vec2(particles[p1].position - particles[p2].position).lengthSquared();
+    float distanceSquared = sf::Vector2f(particles[p1].position - particles[p2].position).lengthSquared();
     return Simulation::Poly6Lookup(distanceSquared);
 }
 
@@ -283,13 +281,13 @@ float Simulation::DensityToPressure(float density){
 }
 
 float Simulation::NearDensityToNearPressure(float nearDensity){
-    float x = nearDensity / targetDensity;
-    return std::max(0.f, (x - 1.f) * nearPressureMultiplier);
+    return nearDensity * nearPressureMultiplier;
 }
 
-void Simulation::ParallelCalculateDensities(int start, int end){
+void Simulation::CalculateDensities(int start, int end){
     for (int i = start; i < end; i++){
         Particle* particle = &particles[i];
+        if (particle->isStatic) continue;
         sf::Vector2i cellPos = Simulation::PosToCellPos(particle->position);
         float totalDensity = 0;
         float totalNearDensity = 0;
@@ -301,8 +299,9 @@ void Simulation::ParallelCalculateDensities(int start, int end){
 
                 for (int otherParticleIndex : indexes){
                     Particle* otherParticle = &particles[otherParticleIndex];
+                    if (otherParticle->isStatic) continue;
 
-                    Vec2 delta = otherParticle->predictedPosition - particle->predictedPosition;
+                    sf::Vector2f delta = otherParticle->predictedPosition - particle->predictedPosition;
                     float distanceSquared = abs(delta.dot(delta));
                     if (distanceSquared > smoothingRadius2) continue;
 
@@ -319,7 +318,7 @@ void Simulation::ParallelCalculateDensities(int start, int end){
     }
 }
 
-void Simulation::CalculateDensities(int threadCount){
+void Simulation::ParallelCalculateDensities(int threadCount){
     std::vector<std::future<void>> futures;
     futures.reserve(threadCount);
 
@@ -328,7 +327,7 @@ void Simulation::CalculateDensities(int threadCount){
         int start = step * i;
         int end = i == threadCount - 1 ? particlesCount : step * (i+1);
 
-        futures.emplace_back(threadPool.push([this, start, end](int threadId) { Simulation::ParallelCalculateDensities(start, end); }));
+        futures.emplace_back(threadPool.push([this, start, end](int threadId) { Simulation::CalculateDensities(start, end); }));
     }
 
     for (auto& f : futures) f.get();
@@ -338,14 +337,14 @@ float Simulation::CalculateSharedPressure(float pressure1, float pressure2){
     return (pressure1 + pressure2) * 0.5f;
 }
 
-Vec2 Simulation::CalculatePressureViscosityForce(Particle* particle){
-    Vec2 pos = particle->predictedPosition;
-    Vec2 vel = particle->velocity;
+sf::Vector2f Simulation::CalculatePressureViscosityForce(Particle* particle){
+    sf::Vector2f pos = particle->predictedPosition;
+    sf::Vector2f vel = particle->velocity;
 
     sf::Vector2i cellPos = Simulation::PosToCellPos(pos);
     std::vector<int> neighbors = Simulation::GetNeighborCells(cellPos);
 
-    Vec2 totalForce;
+    sf::Vector2f totalForce;
     for (int dy = -1; dy <= 1; dy++){
         for (int dx = -1; dx <= 1; dx++){
             int neighborCellPos = (cellPos.y + dy) * horizontalCells + (cellPos.x + dx);
@@ -355,14 +354,15 @@ Vec2 Simulation::CalculatePressureViscosityForce(Particle* particle){
             for (int i = 0; i < indexes.size(); i++){
                 if (indexes[i] == particle->index) continue;
                 Particle* otherParticle = &particles[indexes[i]];
+                if (otherParticle->isStatic) continue;
                 
-                Vec2 delta = otherParticle->predictedPosition - pos;
+                sf::Vector2f delta = otherParticle->predictedPosition - pos;
                 float distanceSquared = abs(delta.dot(delta));
                 if (distanceSquared > smoothingRadius2) continue;
 
                 float distance = std::sqrt(distanceSquared);
 
-                Vec2 direction = distanceSquared > 0 ? delta / distance : Vec2(0, 1);
+                sf::Vector2f direction = distanceSquared > 0 ? delta / distance : sf::Vector2f(0, 1);
 
                 float slope = Simulation::SpikyDerivativeLookup(distance);
                 float nearSlope = Simulation::DerivativeSpikyPow3Lookup(distance);
@@ -370,7 +370,7 @@ Vec2 Simulation::CalculatePressureViscosityForce(Particle* particle){
                 float sharedPressure = Simulation::CalculateSharedPressure(particle->pressure, otherParticle->pressure);
                 float sharedNearPressure = Simulation::CalculateSharedPressure(particle->nearPressure, otherParticle->nearPressure);
                 
-                Vec2 force = -direction * sharedPressure * slope * particleMass / particle->density;
+                sf::Vector2f force = -direction * sharedPressure * slope * particleMass / particle->density;
                 force += -direction * sharedNearPressure * nearSlope * particleMass / particle->density;
                 if (viscosity != 0.f){
                     float viscosityInfluence = Simulation::ViscosityKernelLookup(distance);
@@ -384,45 +384,57 @@ Vec2 Simulation::CalculatePressureViscosityForce(Particle* particle){
     return totalForce;
 }
 
-Vec2 Simulation::GetInteractionForce(int particleIndex){
-    bool leftMouseDown = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
-    bool rightMouseDown = sf::Mouse::isButtonPressed(sf::Mouse::Button::Right);
-    const float radius = 75;
-    float strength = 5000000;
-    if (leftMouseDown && !rightMouseDown) strength *= 1;
-    else if (rightMouseDown && !leftMouseDown) strength *= -1;
-    else return Vec2(0,0);
-    sf::Vector2i mousePos = sf::Mouse::getPosition();
-    Vec2 force = Vec2(0,0);
-    Vec2 offset = Vec2(mousePos) - particles[particleIndex].position;
-    float sqrDist = offset.lengthSquared();
-
-    if (sqrDist < smoothingRadius2){
-        float dst = std::sqrt(sqrDist);
-        Vec2 dirToInputPoint = offset / dst;
-        float centreT = 1 - dst / radius;
-        force = (dirToInputPoint * strength - particles[particleIndex].velocity) * centreT;
-    }
-    return force / pressureMultiplier;
+float clamp01(float v) { 
+    if (v < 0) return 0;
+    if (v > 1) return 1;
+    return v;
 }
 
-Vec2 Simulation::CalculateParticleForces(Particle* particle){
-    Vec2 force;
-    if (enableGravity) force += Vec2(0.f, -gravity * particleMass);
-    force += Simulation::CalculatePressureViscosityForce(particle);
-    if (mode == SIMULATION && enableMouse) force += Simulation::GetInteractionForce(particle->index);
+sf::Vector2f Simulation::GetExternalForces(int particleIndex){
+    bool leftMouseDown = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
+    bool rightMouseDown = sf::Mouse::isButtonPressed(sf::Mouse::Button::Right);
+    const float radius = 100;
+    float strength = 125;
+    if (leftMouseDown && !rightMouseDown) strength *= 1;
+    else if (rightMouseDown && !leftMouseDown) strength *= -1;
+    else strength = 0;
+    sf::Vector2f force = sf::Vector2f(0,-gravity * particleMass);
+    if (!enableGravity) force = sf::Vector2f(0,0);
+
+    if (strength != 0 && mode == SIMULATION && enableMouse){
+        sf::Vector2i mousePos = sf::Mouse::getPosition();
+        sf::Vector2f offset = sf::Vector2f(mousePos) - particles[particleIndex].position;
+        float sqrDist = offset.lengthSquared();
+
+        if (sqrDist < radius*radius){
+            float dst = std::sqrt(sqrDist);
+            float centreT = 1 - dst / radius;
+            float gravityWeight = 1 - (centreT * clamp01(strength / 250));
+            sf::Vector2f dirToCenter = offset / dst;
+            sf::Vector2f acceleration = force * gravityWeight + dirToCenter * centreT * strength;
+            force = particleMass * acceleration;
+        }
+    }
     return force;
 }
 
-void Simulation::ParallelCalculateForces(int start, int end){
+sf::Vector2f Simulation::CalculateParticleForces(Particle* particle){
+    sf::Vector2f force;
+    force += Simulation::CalculatePressureViscosityForce(particle);
+    force += Simulation::GetExternalForces(particle->index);
+    return force;
+}
+
+void Simulation::CalculateForces(int start, int end){
     for (int i = start; i < end; i++){
         Particle* particle = &particles[i];
-        Vec2 force = Simulation::CalculateParticleForces(particle);
+        if (particle->isStatic) continue;
+        sf::Vector2f force = Simulation::CalculateParticleForces(particle);
         particle->acceleration = -force / particle->density;
     }
 }
 
-void Simulation::CalculatePressureViscosityForces(int threadCount){
+void Simulation::ParallelCalculatePressureViscosityForces(int threadCount){
     std::vector<std::future<void>> futures;
     futures.reserve(threadCount);
 
@@ -431,14 +443,14 @@ void Simulation::CalculatePressureViscosityForces(int threadCount){
         int start = step * i;
         int end = i == threadCount - 1 ? particlesCount : step * (i+1);
 
-        futures.emplace_back(threadPool.push([this, start, end](int threadId) { Simulation::ParallelCalculateForces(start, end); }));
+        futures.emplace_back(threadPool.push([this, start, end](int threadId) { Simulation::CalculateForces(start, end); }));
     }
-
     for (auto& f : futures) f.get();
 }
 
 void Simulation::ApplyMovements(){
     for (int i = 0; i < particlesCount; i++){
+        if (particles[i].isStatic) continue;
         particles[i].position += particles[i].velocity * deltaTime + particles[i].acceleration * 0.5f * deltaTime * deltaTime;
         particles[i].velocity += particles[i].acceleration * deltaTime;
     }
@@ -446,6 +458,7 @@ void Simulation::ApplyMovements(){
 
 void Simulation::PredictPositions(){
     for (int i = 0; i < particlesCount; i++){
+        if (particles[i].isStatic) continue;
         particles[i].predictedPosition = particles[i].position + particles[i].velocity * FIXED_DT;
     }
 }
@@ -454,15 +467,19 @@ void Simulation::ResolveCollisions(){
     const float damping = 0.1f;
     const float circleRadiusSquared = circleRadius*circleRadius;
     for (int i = 0; i < particlesCount; i++){
-        Vec2& pos = particles[i].position;
+        if (particles[i].isStatic) continue;
+        sf::Vector2f& pos = particles[i].position;
         sf::Vector2i cellPos = Simulation::PosToCellPos(pos);
         if (pos.x < 0 || pos.x > 1920){
-            pos.x = std::clamp(pos.x, 0.f, 1920.f);
-            particles[i].velocity.x *= -damping;
-            particles[i].velocity *= -damping;
+            if ((pos.x > 1920 && mode == AERODYNAMICS)) particles[i].isStatic = true;
+            else {
+                pos.x = std::clamp(pos.x, 0.f, 1920.f);
+                particles[i].velocity.x *= -damping; 
+                particles[i].velocity *= -damping;
+            }
         }
         
-        if (pos.y < 0 || pos.y > 1080){
+        if ((pos.y < 0 && mode != AERODYNAMICS) || pos.y > 1080){
             pos.y = std::clamp(pos.y, 0.f, 1080.f);
             particles[i].velocity.y *= -damping;
             particles[i].velocity *= -damping;
@@ -476,16 +493,15 @@ void Simulation::ResolveCollisions(){
                     std::vector<int>& indexes = circleGrid[neighborCellPos];
 
                     for (int c : indexes){
-                        Vec2& circle = circles[c];
-                        Vec2 delta = circle - pos;
+                        sf::Vector2f& circle = circles[c];
+                        sf::Vector2f delta = circle - pos;
                         float dstSquared = delta.lengthSquared();
                         if (dstSquared < circleRadiusSquared){
                             float dst = std::sqrt(dstSquared);
-                            Vec2 normal = delta / dst;
+                            sf::Vector2f normal = delta / dst;
 
                             pos = circle - normal * circleRadius;   // position correction
-                            particles[i].velocity -=
-                                2.f * particles[i].velocity.dot(normal) * normal;
+                            particles[i].velocity -= 2.f * particles[i].velocity.dot(normal) * normal;
                             particles[i].velocity *= -damping;
                         }
                     }
@@ -500,23 +516,23 @@ void Simulation::ResolveCollisions(){
 void Simulation::HandleInputs(){
     if (!enableMouse) return;
     sf::Vector2f mousePos = sf::Vector2f(sf::Mouse::getPosition());
-    if (mode == PLAYGROUND && sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)){
+    if (mode != SIMULATION && sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)){
         mousePos.x = std::clamp(mousePos.x, 1.f, 1919.f);
         mousePos.y = std::clamp(mousePos.y, 1.f, 1079.f);
         circles.push_back(mousePos);
 
         sf::Vector2i cellPos = Simulation::PosToCellPos(mousePos);
         circleGrid[cellPos.y * horizontalCells + cellPos.x].push_back(circles.size()-1);
-    } else if (mode == PLAYGROUND && sf::Mouse::isButtonPressed(sf::Mouse::Button::Right)){
+    } else if (mode != SIMULATION && sf::Mouse::isButtonPressed(sf::Mouse::Button::Right)){
         for (int i = 0; i < circles.size(); i++) {
-            Vec2& circle = circles.at(i);
+            sf::Vector2f& circle = circles.at(i);
             if ((circle - mousePos).lengthSquared() > circleRadius*circleRadius*10) continue;
             circles.erase(circles.begin()+i);
         }
         circleGrid.clear();
         circleGrid.resize(horizontalCells * verticalCells);
         for (int i = 0; i < circles.size(); i++) { // Reorganize the grid (this is so inefficient)
-            Vec2& circle = circles.at(i);
+            sf::Vector2f& circle = circles.at(i);
             sf::Vector2i cellPos = Simulation::PosToCellPos(circle);
             circleGrid[cellPos.y * horizontalCells + cellPos.x].push_back(i);
         }
@@ -537,31 +553,46 @@ void Simulation::Update(){
     if (paused) return;
     const int threadCount = threadPool.size();
 
-    timeElapsedSinceLastSpawn += deltaTime;
     if (mode == PLAYGROUND && spawnParticles && particlesCount+1 < MAX_PARTICLES && timeElapsedSinceLastSpawn > 1.f / spawnsPerSecond){
-        Vec2 randomPos(1920 / 2 - spawnRadius / 2 + rand() % (int)spawnRadius, 0);
-        Vec2 initialVelocity(0, 100);
-        Particle p(randomPos, particlesCount);
-        p.velocity = initialVelocity;
-        Simulation::SpawnParticle(p);
-        timeElapsedSinceLastSpawn -= 1.f / spawnsPerSecond;
+        while (timeElapsedSinceLastSpawn > 1.f / spawnsPerSecond){
+            sf::Vector2f randomPos(1920 / 2 - spawnRadius / 2 + rand() % (int)spawnRadius, 0);
+            sf::Vector2f initialVelocity(0, 100);
+            Particle p(randomPos, particlesCount);
+            p.velocity = initialVelocity;
+            Simulation::SpawnParticle(p);
+            timeElapsedSinceLastSpawn -= 1.f / spawnsPerSecond;
+        }
+        timeElapsedSinceLastSpawn += deltaTime;
+    } else if (mode == AERODYNAMICS){
+        const float spawnRate = 1.f / 60.f;
+        while (timeElapsedSinceLastSpawn > spawnRate){
+            for (int i = 0; i < spawnsPerSecond; i++){
+                sf::Vector2f pos(1, i / spawnsPerSecond * 1080);
+                sf::Vector2f initialVelocity(100*gravity, 0);
+                Particle p(pos, particlesCount);
+                p.velocity = initialVelocity;
+                Simulation::SpawnParticle(p);
+            }
+            timeElapsedSinceLastSpawn -= spawnRate;
+        }
+        timeElapsedSinceLastSpawn += deltaTime;
     }
 
     clock2.restart();
-    deltaTime /= simulationSteps; // Deltatime is set by the main function with Simulation::SetDeltatime
+    deltaTime /= simulationSteps; // Deltatime is set by the main function with Simulation::SetDeltatime()
     deltaTime *= timeMultiplier;
     for (int i = 0; i < simulationSteps; i++){
 
         Simulation::PredictPositions();
         Simulation::CalculateParticleLookups();
-        Simulation::CalculateDensities(threadCount);
+        Simulation::ParallelCalculateDensities(threadCount);
         debugText.at(0).setString("Densities Calculation: " + std::to_string(clock2.restart().asMilliseconds()*simulationSteps));
 
-        Simulation::CalculatePressureViscosityForces(threadCount);
+        Simulation::ParallelCalculatePressureViscosityForces(threadCount);
         debugText.at(1).setString("Pressure Forces Calculation: " + std::to_string(clock2.restart().asMilliseconds()*simulationSteps));
 
-        Simulation::ApplyMovements();
         Simulation::ResolveCollisions();
+        Simulation::ApplyMovements();
     }
 }
 
@@ -573,7 +604,14 @@ sf::Color lerp(sf::Color a, sf::Color b, float t){
     return sf::Color(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t), lerp(a.a, b.a, t));
 }
 
+bool contains(std::vector<int> v, int what){
+    for (int item : v) if (item == what) return true;
+    return false;
+}
+
 sf::Color Simulation::GetParticleColor(int i){
+    if (particles[i].index != i) std::cout << "Error in particle index: " << particles[i].index << std::endl;
+    if (contains(whiteParticles, i)) return sf::Color::White;
     float speed = abs(particles[i].velocity.length());
     float maxSpeed = 750.f;
     float gradient = std::min(speed / maxSpeed, 1.f);
@@ -587,23 +625,22 @@ sf::Color Simulation::GetParticleColor(int i){
 void Simulation::Draw(sf::RenderTexture& target){
     renderClock.restart();
 
-    const float radius = 6;
     if (!particleVertexes.create(particlesCount*6)) std::cerr << "Couldn't create particle vertex buffer\n";
     const int circleSegments = 8;
     if (!circleVertexes.create(circles.size()*circleSegments*3)) std::cerr << "Couldn't create circle vertex buffer\n";
-    sf::Vector2i mouseCell = Simulation::PosToCellPos(sf::Mouse::getPosition());
+    sf::Vector2i mouseCell = Simulation::PosToCellPos(sf::Vector2f(sf::Mouse::getPosition()));
     sf::Vertex *vertexes = new sf::Vertex[particlesCount*6];
     
-    for (int i = 0; i < particlesCount; ++i) { // Draw every particle as a quad
-        const Vec2& pos = particles[i].position;
+    for (int i = 0; i < particlesCount; ++i) {
+        const sf::Vector2f& pos = particles[i].position;
 
         sf::Vertex* quad = &vertexes[i*6];
         sf::Color color = Simulation::GetParticleColor(i);
 
-        Vec2 tl = pos + Vec2(-radius, -radius);
-        Vec2 tr = pos + Vec2(radius, -radius);
-        Vec2 br = pos + Vec2(radius, radius);
-        Vec2 bl = pos + Vec2(-radius, radius);
+        sf::Vector2f tl = pos + sf::Vector2f(-particleRadius, -particleRadius);
+        sf::Vector2f tr = pos + sf::Vector2f(particleRadius, -particleRadius);
+        sf::Vector2f br = pos + sf::Vector2f(particleRadius, particleRadius);
+        sf::Vector2f bl = pos + sf::Vector2f(-particleRadius, particleRadius);
 
         quad[0].position = tl; quad[0].color = color;
         quad[1].position = tr; quad[1].color = color;
@@ -620,12 +657,12 @@ void Simulation::Draw(sf::RenderTexture& target){
     const sf::Color circleColor = sf::Color::White;
     sf::Vertex *vertexesCircle = new sf::Vertex[circles.size()*circleSegments*3];
     float step = 2.f * PI / circleSegments;
-    for (int i = 0; i < circles.size(); i++){ // Draw every circle
+    for (int i = 0; i < circles.size(); i++){
         sf::Vertex* circle = &vertexesCircle[i*circleSegments*3];
-        Vec2 center = circles[i];
+        sf::Vector2f center = circles[i];
         for (int x = 0; x < circleSegments; x++){
-            Vec2 pos1 = center + Vec2(std::sin(x * step), std::cos(x * step)) * circleRadius;
-            Vec2 pos2 = center + Vec2(std::sin((x + 1) * step), std::cos((x + 1) * step)) * circleRadius;
+            sf::Vector2f pos1 = center + sf::Vector2f(std::sin(x * step), std::cos(x * step)) * circleRadius;
+            sf::Vector2f pos2 = center + sf::Vector2f(std::sin((x + 1) * step), std::cos((x + 1) * step)) * circleRadius;
 
             int v = x * 3;
             circle[v].position = center; circle[v].color = circleColor;
@@ -652,8 +689,34 @@ void Simulation::Draw(sf::RenderTexture& target){
     }
 
     debugText.at(2).setString("Rendering: " + std::to_string(lastDelay));
-    debugText.at(2).setPosition(Vec2(10, 2*characterSize*2+50));
+    debugText.at(2).setPosition(sf::Vector2f(10, 2*characterSize*2+50));
     target.draw(debugText.at(2));
 
+    if (particlesCount+1 >= MAX_PARTICLES){
+        sf::Text text(font, "Max particles reached! (" + std::to_string(MAX_PARTICLES) + ")");
+        text.setPosition(sf::Vector2f(1920/2 - text.getLocalBounds().size.x/2, 10));
+        text.setFillColor(sf::Color::Red);
+        target.draw(text);
+    }
+
     lastDelay = renderClock.restart().asMilliseconds();
+}
+
+// Shapes
+std::vector<sf::Vector2f> Simulation::Circle::GetPositions() const {
+    std::vector<sf::Vector2f> list;
+    list.push_back(sf::Vector2f(0,0));
+    int counter = 8;
+    int level = 1;
+    for (int i = 0; i < density; i++){
+        counter--;
+        int total = level * 8;
+        int d = 2 * PI * (counter/total);
+        list.push_back(sf::Vector2f(sin(counter) * level, cos(counter) * level));
+        if (counter == -1){
+            level++;
+            counter = level * 8;
+        }
+    }
+    return list;
 }

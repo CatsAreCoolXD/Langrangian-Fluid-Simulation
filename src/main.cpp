@@ -49,7 +49,6 @@ int main()
     sim.SetDeltatime(1.f / 120.f);
     std::cout << "Initialized simulation\n";
 
-    bool settingsWindow = false, spawnParticles = false;
 
     sf::RenderTexture render(sf::Vector2u(1920u, 1080u));
 
@@ -58,6 +57,7 @@ int main()
     sf::Font font("Fonts/OpenSans-Bold.ttf");
     sf::Text fpsText(font);
 
+    bool settingsWindow = false;
     // Settings
     float newTargetDensity = 1;
     Slider targetDensitySlider(&newTargetDensity, 0.f, 10.f, sf::Vector2f(200, 5), sf::Vector2f(1600, 50), "Target Density");
@@ -68,14 +68,12 @@ int main()
     float newNearPressureMultiplier = 1;
     Slider nearPressureMultiplierSlider(&newNearPressureMultiplier, 0, 10, sf::Vector2f(200, 5), sf::Vector2f(1600, 200), "Near Pressure Multiplier");
     
-    float newViscosity = viscosity;
-    Slider viscositySlider(&newViscosity, 0, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 275), "Viscosity");
+    Slider viscositySlider(&sim.GetViscosity(), 0, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 275), "Viscosity");
     
     float newGravity = gravity;
     Slider gravitySlider(&newGravity, -20, 20, sf::Vector2f(200, 5), sf::Vector2f(1600, 350), "Gravity");
     
-    float newTimeMultiplier = 1.f;
-    Slider timeSlider(&newTimeMultiplier, -1, 1, sf::Vector2f(200, 5), sf::Vector2f(1600, 425), "Time Multiplier");
+    Slider timeSlider(&sim.GetTimeMultiplier(), 0.01f, 3, sf::Vector2f(200, 5), sf::Vector2f(1600, 425), "Time Multiplier");
 
     bool useGravity = true;
     CheckBox gravityCheckBox(&useGravity, "Use Gravity", sf::Vector2f(1550, 475), sf::Vector2f(11,11));
@@ -92,10 +90,14 @@ int main()
     float spawnSquareSize = 1024;
     Slider spawnSlider(&spawnSquareSize, 1, 2048, sf::Vector2f(200, 5), sf::Vector2f(1600, 775), "Spawn Square Size");
 
+    Slider particlesSizeSlider(&sim.GetParticlesRadius(), 0.1f, 10.f, sf::Vector2f(200, 5), sf::Vector2f(1600, 850), "Particles Draw Size");
+
+    Slider spawnsPerSecondSlider(&sim.GetSpawnsPerSecond(), 1.f, 1000.f, sf::Vector2f(200, 5), sf::Vector2f(1600, 925), "Spawns Per Second (Playground Mode)");
+
     sf::Text settingsWindowText(font, "Press H to toggle settings window", 16);
     settingsWindowText.setPosition(sf::Vector2f(1600,5));
 
-    SelectionMenu modeMenu(&mode, {"Simulation", "Playground"}, sf::Vector2f(1550, 850), sf::Vector2f(250, 50));
+    SelectionMenu modeMenu(&mode, {"Simulation", "Playground", "Aerodynamics"}, sf::Vector2f(10, 175), sf::Vector2f(250, 50));
 
     std::vector<float> fpsList;
 
@@ -109,6 +111,8 @@ int main()
 
         render.clear();
         window.clear();
+
+        sf::Vector2f mousePos(sf::Mouse::getPosition(window));
 
         while (const std::optional event = window.pollEvent())
         {
@@ -128,14 +132,19 @@ int main()
                 } else if (keyEvent->scancode == sf::Keyboard::Scancode::Tab){
                     mode = (mode + 1) % 2;
                     sim.SetMode(mode);
-                } else if (mode == PLAYGROUND && keyEvent->scancode == sf::Keyboard::Scancode::E){
-                    spawnParticles = !spawnParticles;
-                    sim.EnableParticleSpawner(spawnParticles);
+                    std::cout << "Changed mode to " << mode << std::endl;
+                } else if (keyEvent->scancode == sf::Keyboard::Scancode::E){
+                    if (mode == PLAYGROUND){
+                        sim.ToggleParticleSpawner();
+                    } else if (mode == SIMULATION || mode == AERODYNAMICS){
+                        Particle whiteParticle(mousePos, sim.GetParticleCount());
+                        whiteParticle.velocity = sf::Vector2f(0,0);
+                        sim.AddWhiteParticle();
+                        sim.SpawnParticle(whiteParticle);
+                    }
                 }
             }
         }
-
-        sf::Vector2f mousePos(sf::Mouse::getPosition(window));
 
         sim.SetInteractionAbility(!settingsWindow);
 
@@ -156,14 +165,12 @@ int main()
             sim.SetNearPressureMultiplier(newNearPressureMultiplier * nearPressureMultiplier);
             
             viscositySlider.Draw(render, mousePos);
-            sim.SetViscosity(newViscosity);
 
             gravitySlider.Draw(render, mousePos);
             gravityCheckBox.Draw(render, mousePos);
             sim.SetGravity(newGravity, useGravity);
 
             timeSlider.Draw(render, mousePos);
-            sim.SetTimeMultiplier(newTimeMultiplier);
 
             particlesSlider.Draw(render, mousePos);
             if (mode == SIMULATION) sim.SetParticlesAmount(newParticlesCount);
@@ -177,9 +184,13 @@ int main()
             spawnSlider.Draw(render, mousePos);
             sim.SetStartingSize(spawnSquareSize);
 
-            modeMenu.Draw(render, mousePos);
-            sim.SetMode(mode);
+            particlesSizeSlider.Draw(render, mousePos);
+
+            spawnsPerSecondSlider.Draw(render, mousePos);
+
         }
+        modeMenu.Draw(render, mousePos);
+        sim.SetMode(mode);
 
         float avgFps = GetAverage(fpsList);
         std::string fpsString = (std::string)"FPS: " + std::to_string(avgFps);
